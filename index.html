@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Notes App</title>
+    <title>Apple Notes Pro</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome Kit (YOUR KIT) -->
@@ -68,14 +68,14 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5);
+            background-color: rgba(0, 0, 0, 0.4); /* Darker overlay */
             display: flex;
             justify-content: center;
             align-items: center;
             z-index: 100;
-            transition: opacity 0.3s ease-in-out;
             opacity: 0;
             pointer-events: none;
+            transition: opacity 0.3s ease-out;
         }
         .modal-overlay.open {
             opacity: 1;
@@ -86,17 +86,18 @@
             padding: 1.5rem;
             border-radius: 1rem;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-            transform: translateY(20px);
+            transform: scale(0.95) translateY(10px); /* Initial smaller scale and slight shift */
             opacity: 0;
-            transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease-out; /* Bounce effect */
             max-width: 90vw;
             width: 400px;
         }
         .modal-overlay.open .modal-content {
-            transform: translateY(0);
+            transform: scale(1) translateY(0);
             opacity: 1;
         }
-         /* Desktop sidebar fixed position for larger screens */
+
+        /* Desktop sidebar fixed position for larger screens */
         @media (min-width: 1024px) {
             .lg\:desktop-sidebar-fixed {
                 position: fixed;
@@ -105,11 +106,7 @@
                 top: 0;
                 bottom: 0;
             }
-            .lg\:desktop-main-content-shifted {
-                margin-left: 16rem; /* Adjust based on sidebar width */
-            }
         }
-
     </style>
 </head>
 <body>
@@ -148,7 +145,9 @@
           const [showMoveNoteModal, setShowMoveNoteModal] = useState(false);
           const [noteToMove, setNoteToMove] = useState(null);
           const [showConfirmModal, setShowConfirmModal] = useState(false);
-          const [confirmModalDetails, setConfirmModalDetails] = useState({ message: '', onConfirm: () => {}, type: 'delete' });
+          const [confirmModalDetails, setConfirmModalDetails] = useState({ message: '', onConfirm: () => {}, onCancel: () => {}, type: 'delete' });
+          const [showInputModal, setShowInputModal] = useState(false);
+          const [inputModalDetails, setInputModalDetails] = useState({ title: '', placeholder: '', onConfirm: () => {}, onCancel: () => {}, initialValue: '' });
 
 
           const editorRef = useRef(null); // Ref for the contenteditable div
@@ -286,7 +285,8 @@
           };
 
           const handleInsertImage = () => {
-            const url = prompt("Enter image URL:"); // Still using prompt for simplicity here
+            // Placeholder for image upload, could be replaced with a custom modal for better UX
+            const url = prompt("Enter image URL:");
             if (url) {
               handleEditorCommand('insertImage', url);
             }
@@ -306,11 +306,20 @@
           const toggleSidebar = () => setShowSidebar(!showSidebar);
           const closeSidebar = () => setShowSidebar(false);
 
-          const handleAddFolder = () => {
-              const newFolderName = prompt("Enter new folder name:"); // Using prompt temporarily
-              if (newFolderName && !folders.includes(newFolderName)) {
-                  setFolders([...folders, newFolderName]);
-              }
+          const promptAddFolder = () => {
+              setInputModalDetails({
+                  title: 'Add New Folder',
+                  placeholder: 'Folder Name',
+                  onConfirm: (name) => {
+                      if (name && !folders.includes(name)) {
+                          setFolders(prev => [...prev, name]);
+                      }
+                      setShowInputModal(false);
+                  },
+                  onCancel: () => setShowInputModal(false),
+                  initialValue: ''
+              });
+              setShowInputModal(true);
           };
 
           const handleDeleteFolder = (folderName) => {
@@ -329,11 +338,20 @@
               setShowConfirmModal(true);
           };
 
-          const handleAddTag = () => {
-              const newTagName = prompt("Enter new tag name:"); // Using prompt temporarily
-              if (newTagName && !tags.includes(newTagName)) {
-                  setTags([...tags, newTagName]);
-              }
+          const promptAddTag = () => {
+              setInputModalDetails({
+                  title: 'Add New Tag',
+                  placeholder: 'Tag Name',
+                  onConfirm: (name) => {
+                      if (name && !tags.includes(name)) {
+                          setTags(prev => [...prev, name]);
+                      }
+                      setShowInputModal(false);
+                  },
+                  onCancel: () => setShowInputModal(false),
+                  initialValue: ''
+              });
+              setShowInputModal(true);
           };
 
           const handleDeleteTag = (tagName) => {
@@ -413,20 +431,22 @@
                 activeFolder={activeFolder}
                 setActiveFolder={(folder) => {
                   setActiveFolder(folder);
-                  closeSidebar();
+                  // Ensure sidebar closes on mobile after selection
+                  if (window.innerWidth < 1024) onClose();
                 }}
                 showSidebar={showSidebar}
                 onClose={closeSidebar}
                 setShowRecentlyDeleted={setShowRecentlyDeleted}
                 setFolders={setFolders}
                 setTags={setTags}
-                handleAddFolder={handleAddFolder}
+                handleAddFolder={promptAddFolder}
                 handleDeleteFolder={handleDeleteFolder}
-                handleAddTag={handleAddTag}
+                handleAddTag={promptAddTag}
                 handleDeleteTag={handleDeleteTag}
               />
 
               {/* Main Content */}
+              {/* Added lg:ml-64 to shift content on desktop */}
               <div className={`flex-1 flex flex-col transition-transform duration-300 ${showSidebar ? 'translate-x-64' : 'translate-x-0'} lg:ml-64 lg:translate-x-0`}>
                 {/* Top Bar */}
                 <Header
@@ -474,6 +494,7 @@
                 </div>
 
                 {/* Bottom Search Bar and New Note Button */}
+                {/* Added lg:pl-64 to adjust for desktop sidebar */}
                 <div ref={bottomToolbarRef} className="fixed bottom-0 left-0 right-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-t-lg flex items-center justify-between w-full transition-all duration-300 lg:pl-64">
                   <div className="relative flex-1 mr-2">
                     <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
@@ -513,6 +534,15 @@
                       confirmButtonColor={confirmModalDetails.type === 'permanent-delete' ? 'bg-red-500' : 'bg-yellow-500'}
                   />
               )}
+              {showInputModal && (
+                  <InputModal
+                      title={inputModalDetails.title}
+                      placeholder={inputModalDetails.placeholder}
+                      onConfirm={inputModalDetails.onConfirm}
+                      onCancel={inputModalDetails.onCancel}
+                      initialValue={inputModalDetails.initialValue}
+                  />
+              )}
             </div>
           );
         };
@@ -527,14 +557,14 @@
               <button onClick={toggleSidebar} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
                 <i className={`fa-lg ${showSidebar ? 'fas fa-times' : 'fas fa-bars'}`}></i>
               </button>
-              <h1 className="text-2xl font-semibold text-gray-800">Notes</h1>
+              <h1 className="text-2xl font-semibold text-gray-800 sm:text-3xl">Notes</h1>
               <div className="flex space-x-2 relative">
                 {/* Sort Button */}
                 <button onClick={() => setShowSortMenu(!showSortMenu)} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
                   <i className="fas fa-sort fa-lg"></i>
                 </button>
                 {showSortMenu && (
-                  <div className="absolute right-0 top-12 mt-2 w-48 bg-white rounded-lg shadow-xl py-1 z-40">
+                  <div className="absolute right-0 top-12 mt-2 w-48 bg-white rounded-lg shadow-xl py-1 z-40 transition-all duration-200">
                     {['Newest', 'Oldest', 'A-Z', 'Z-A'].map(option => (
                       <button
                         key={option}
@@ -691,7 +721,7 @@
                     <i className="fas fa-ellipsis-h"></i>
                   </button>
                   {showActions && (
-                    <div className="absolute right-0 bottom-full mb-2 w-36 bg-white rounded-lg shadow-lg py-1 z-10">
+                    <div className="absolute right-0 bottom-full mb-2 w-36 bg-white rounded-lg shadow-xl py-1 z-10">
                       <button onClick={(e) => { e.stopPropagation(); onDelete(note.id); setShowActions(false); }} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors">
                         <i className="fas fa-trash-alt mr-2"></i> Delete
                       </button>
@@ -1068,7 +1098,7 @@
                 <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
                   <i className="fas fa-arrow-left fa-lg"></i>
                 </button>
-                <h1 className="text-2xl font-semibold text-gray-800">Recently Deleted</h1>
+                <h1 className="text-2xl font-semibold text-gray-800 sm:text-3xl">Recently Deleted</h1>
                 <div className="w-10"></div> {/* Placeholder for alignment */}
               </div>
 
@@ -1115,8 +1145,8 @@
                                 <button
                                     key={folder}
                                     onClick={() => setSelectedFolder(folder)}
-                                    className={`w-full text-left px-4 py-3 rounded-lg flex justify-between items-center transition-colors duration-200
-                                        ${selectedFolder === folder ? 'bg-yellow-100 text-yellow-700 font-medium' : 'hover:bg-gray-100 text-gray-800'}`}
+                                    className={`w-full text-left px-4 py-3 rounded-lg flex justify-between items-center transition-colors duration-200 hover:bg-gray-100 active:scale-95
+                                        ${selectedFolder === folder ? 'bg-yellow-100 text-yellow-700 font-medium' : 'text-gray-800'}`}
                                 >
                                     <span><i className="fas fa-folder mr-3"></i> {folder}</span>
                                     {selectedFolder === folder && <i className="fas fa-check text-yellow-500"></i>}
@@ -1161,6 +1191,55 @@
                                 className={`px-5 py-2 rounded-full text-white shadow-md transition-all duration-200 transform active:scale-95 ${confirmButtonColor} hover:${confirmButtonColor.replace('bg-', 'bg-')}-600`}
                             >
                                 {confirmButtonText}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const InputModal = ({ title, placeholder, onConfirm, onCancel, initialValue = '' }) => {
+            const [inputValue, setInputValue] = useState(initialValue);
+
+            const handleConfirm = () => {
+                if (inputValue.trim()) {
+                    onConfirm(inputValue.trim());
+                } else {
+                    onCancel(); // Or show an error message
+                }
+            };
+
+            const handleKeyDown = (e) => {
+                if (e.key === 'Enter') {
+                    handleConfirm();
+                }
+            };
+
+            return (
+                <div className="modal-overlay open">
+                    <div className="modal-content w-full max-w-sm">
+                        <h3 className="text-xl font-semibold mb-4 text-gray-800 text-center">{title}</h3>
+                        <input
+                            type="text"
+                            placeholder={placeholder}
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            className="w-full p-3 rounded-lg bg-gray-100 bg-opacity-50 border border-gray-200 focus:outline-none focus:ring-1 focus:ring-yellow-400 text-gray-800 placeholder-gray-500 transition-all duration-200 mb-6"
+                            autoFocus
+                        />
+                        <div className="flex justify-end space-x-3">
+                            <button
+                                onClick={onCancel}
+                                className="px-5 py-2 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 transition-all duration-200 active:scale-95"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleConfirm}
+                                className="px-5 py-2 rounded-full bg-yellow-500 text-white shadow-md hover:bg-yellow-600 transition-all duration-200 transform active:scale-95"
+                            >
+                                Add
                             </button>
                         </div>
                     </div>

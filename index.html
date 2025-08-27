@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mobile Notes App</title>
+    <title>Super Notes App</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome Kit (YOUR KIT) -->
@@ -61,6 +61,55 @@
             cursor: pointer;
             box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.3);
         }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            transition: opacity 0.3s ease-in-out;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .modal-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .modal-content {
+            background-color: #fff;
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            transform: translateY(20px);
+            opacity: 0;
+            transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+            max-width: 90vw;
+            width: 400px;
+        }
+        .modal-overlay.open .modal-content {
+            transform: translateY(0);
+            opacity: 1;
+        }
+         /* Desktop sidebar fixed position for larger screens */
+        @media (min-width: 1024px) {
+            .lg\:desktop-sidebar-fixed {
+                position: fixed;
+                transform: translateX(0) !important; /* Always visible on desktop */
+                left: 0;
+                top: 0;
+                bottom: 0;
+            }
+            .lg\:desktop-main-content-shifted {
+                margin-left: 16rem; /* Adjust based on sidebar width */
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -94,6 +143,13 @@
           const [recentlyDeletedNotes, setRecentlyDeletedNotes] = useState([]);
           const [showDrawingModal, setShowDrawingModal] = useState(false);
           const [drawingData, setDrawingData] = useState(null); // To store the drawing
+
+          // Modals state
+          const [showMoveNoteModal, setShowMoveNoteModal] = useState(false);
+          const [noteToMove, setNoteToMove] = useState(null);
+          const [showConfirmModal, setShowConfirmModal] = useState(false);
+          const [confirmModalDetails, setConfirmModalDetails] = useState({ message: '', onConfirm: () => {}, type: 'delete' });
+
 
           const editorRef = useRef(null); // Ref for the contenteditable div
           const bottomToolbarRef = useRef(null);
@@ -169,11 +225,20 @@
           const handleDeleteNote = (id) => {
             const noteToDelete = notes.find(note => note.id === id);
             if (noteToDelete) {
-              setRecentlyDeletedNotes([noteToDelete, ...recentlyDeletedNotes]);
-              setNotes(notes.filter(note => note.id !== id));
-              if (editingNoteId === id) {
-                setEditingNoteId(null);
-              }
+                setConfirmModalDetails({
+                    message: `Are you sure you want to delete "${noteToDelete.title}"? It will be moved to Recently Deleted.`,
+                    onConfirm: () => {
+                        setRecentlyDeletedNotes([noteToDelete, ...recentlyDeletedNotes]);
+                        setNotes(notes.filter(note => note.id !== id));
+                        if (editingNoteId === id) {
+                            setEditingNoteId(null);
+                        }
+                        setShowConfirmModal(false);
+                    },
+                    onCancel: () => setShowConfirmModal(false),
+                    type: 'delete'
+                });
+                setShowConfirmModal(true);
             }
           };
 
@@ -186,15 +251,32 @@
           };
 
           const handlePermanentDelete = (id) => {
-            setRecentlyDeletedNotes(recentlyDeletedNotes.filter(note => note.id !== id));
+            const noteTitle = recentlyDeletedNotes.find(note => note.id === id)?.title || 'this note';
+            setConfirmModalDetails({
+                message: `Are you sure you want to permanently delete "${noteTitle}"? This action cannot be undone.`,
+                onConfirm: () => {
+                    setRecentlyDeletedNotes(recentlyDeletedNotes.filter(note => note.id !== id));
+                    setShowConfirmModal(false);
+                },
+                onCancel: () => setShowConfirmModal(false),
+                type: 'permanent-delete'
+            });
+            setShowConfirmModal(true);
           };
 
           const handlePinNote = (id) => {
             setNotes(notes.map(note => note.id === id ? { ...note, isPinned: !note.isPinned } : note));
           };
 
-          const handleMoveNote = (id, newFolder) => {
-            setNotes(notes.map(note => note.id === id ? { ...note, folder: newFolder } : note));
+          const triggerMoveNote = (note) => {
+              setNoteToMove(note);
+              setShowMoveNoteModal(true);
+          };
+
+          const handleMoveNote = (noteId, newFolder) => {
+            setNotes(notes.map(note => note.id === noteId ? { ...note, folder: newFolder } : note));
+            setShowMoveNoteModal(false);
+            setNoteToMove(null);
           };
 
           const handleToggleChecklist = () => {
@@ -204,7 +286,7 @@
           };
 
           const handleInsertImage = () => {
-            const url = prompt("Enter image URL:");
+            const url = prompt("Enter image URL:"); // Still using prompt for simplicity here
             if (url) {
               handleEditorCommand('insertImage', url);
             }
@@ -224,9 +306,58 @@
           const toggleSidebar = () => setShowSidebar(!showSidebar);
           const closeSidebar = () => setShowSidebar(false);
 
+          const handleAddFolder = () => {
+              const newFolderName = prompt("Enter new folder name:"); // Using prompt temporarily
+              if (newFolderName && !folders.includes(newFolderName)) {
+                  setFolders([...folders, newFolderName]);
+              }
+          };
+
+          const handleDeleteFolder = (folderName) => {
+              setConfirmModalDetails({
+                  message: `Are you sure you want to delete folder "${folderName}"? Notes within this folder will not be deleted but will appear in 'All Notes'.`,
+                  onConfirm: () => {
+                      setFolders(folders.filter(f => f !== folderName));
+                      if (activeFolder === folderName) {
+                          setActiveFolder('All Notes');
+                      }
+                      setShowConfirmModal(false);
+                  },
+                  onCancel: () => setShowConfirmModal(false),
+                  type: 'delete-folder'
+              });
+              setShowConfirmModal(true);
+          };
+
+          const handleAddTag = () => {
+              const newTagName = prompt("Enter new tag name:"); // Using prompt temporarily
+              if (newTagName && !tags.includes(newTagName)) {
+                  setTags([...tags, newTagName]);
+              }
+          };
+
+          const handleDeleteTag = (tagName) => {
+              setConfirmModalDetails({
+                  message: `Are you sure you want to delete tag "${tagName}"? Notes with this tag will simply lose the tag.`,
+                  onConfirm: () => {
+                      setTags(tags.filter(t => t !== tagName));
+                      // Also remove this tag from all notes that have it
+                      setNotes(notes.map(note => ({
+                          ...note,
+                          tags: note.tags.filter(t => t !== tagName)
+                      })));
+                      setShowConfirmModal(false);
+                  },
+                  onCancel: () => setShowConfirmModal(false),
+                  type: 'delete-tag'
+              });
+              setShowConfirmModal(true);
+          };
+
+
           // Filter and sort notes
           const filteredAndSortedNotes = notes
-            .filter(note => activeFolder === 'All Notes' || note.folder === activeFolder)
+            .filter(note => activeFolder === 'All Notes' || note.folder === activeFolder || note.tags.includes(activeFolder))
             .filter(note => note.title.toLowerCase().includes(searchTerm.toLowerCase()) || note.content.toLowerCase().includes(searchTerm.toLowerCase()))
             .sort((a, b) => {
               if (sortOrder === 'Newest') return new Date(b.createdAt) - new Date(a.createdAt);
@@ -289,10 +420,14 @@
                 setShowRecentlyDeleted={setShowRecentlyDeleted}
                 setFolders={setFolders}
                 setTags={setTags}
+                handleAddFolder={handleAddFolder}
+                handleDeleteFolder={handleDeleteFolder}
+                handleAddTag={handleAddTag}
+                handleDeleteTag={handleDeleteTag}
               />
 
               {/* Main Content */}
-              <div className={`flex-1 flex flex-col transition-transform duration-300  'translate-x-0'`}>
+              <div className={`flex-1 flex flex-col transition-transform duration-300 ${showSidebar ? 'translate-x-64' : 'translate-x-0'} lg:ml-64 lg:translate-x-0`}>
                 {/* Top Bar */}
                 <Header
                   toggleSidebar={toggleSidebar}
@@ -300,29 +435,46 @@
                   setViewMode={setViewMode}
                   sortOrder={sortOrder}
                   setSortOrder={setSortOrder}
+                  showSidebar={showSidebar}
                 />
 
                 {/* Notes List/Gallery */}
-                <div className="flex-1 overflow-y-auto px-4 pt-2" style={{ paddingBottom: `px` }}> {/* Add padding to account for bottom toolbar */}
+                <div className="flex-1 overflow-y-auto px-4 pt-2 pb-4" style={{ paddingBottom: `${bottomToolbarHeight + 16}px` }}>
                   {filteredAndSortedNotes.length === 0 ? (
                     <p className="text-center text-gray-500 mt-10">No notes found in this folder.</p>
                   ) : viewMode === 'list' ? (
                     <div className="space-y-3">
                       {filteredAndSortedNotes.map(note => (
-                        <NoteCard key={note.id} note={note} onEdit={() => setEditingNoteId(note.id)} onDelete={handleDeleteNote} onPin={handlePinNote} onMove={handleMoveNote} folders={folders} />
+                        <NoteCard
+                            key={note.id}
+                            note={note}
+                            onEdit={() => setEditingNoteId(note.id)}
+                            onDelete={handleDeleteNote}
+                            onPin={handlePinNote}
+                            onMove={triggerMoveNote} // Pass triggerMoveNote
+                            folders={folders}
+                        />
                       ))}
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                       {filteredAndSortedNotes.map(note => (
-                        <NoteGalleryCard key={note.id} note={note} onEdit={() => setEditingNoteId(note.id)} onDelete={handleDeleteNote} onPin={handlePinNote} onMove={handleMoveNote} folders={folders} />
+                        <NoteGalleryCard
+                            key={note.id}
+                            note={note}
+                            onEdit={() => setEditingNoteId(note.id)}
+                            onDelete={handleDeleteNote}
+                            onPin={handlePinNote}
+                            onMove={triggerMoveNote} // Pass triggerMoveNote
+                            folders={folders}
+                        />
                       ))}
                     </div>
                   )}
                 </div>
 
                 {/* Bottom Search Bar and New Note Button */}
-                <div ref={bottomToolbarRef} className="fixed bottom-0 left-0 right-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-t-lg flex items-center justify-between w-full transition-all duration-300">
+                <div ref={bottomToolbarRef} className="fixed bottom-0 left-0 right-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-t-lg flex items-center justify-between w-full transition-all duration-300 lg:pl-64">
                   <div className="relative flex-1 mr-2">
                     <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
                     <input
@@ -338,28 +490,47 @@
                       onClick={handleCreateNote}
                       aria-label="Create New Note"
                   >
-                      <i className="fas fa-square-pen fa-lg"></i> {/* Changed to fas fa-square-pen for New Note */}
+                      <i className="fas fa-square-pen fa-lg"></i>
                   </button>
                 </div>
               </div>
+
+              {/* Modals */}
+              {showMoveNoteModal && (
+                  <MoveNoteModal
+                      note={noteToMove}
+                      folders={folders}
+                      onMove={handleMoveNote}
+                      onClose={() => setShowMoveNoteModal(false)}
+                  />
+              )}
+              {showConfirmModal && (
+                  <ConfirmModal
+                      message={confirmModalDetails.message}
+                      onConfirm={confirmModalDetails.onConfirm}
+                      onCancel={confirmModalDetails.onCancel}
+                      confirmButtonText={confirmModalDetails.type === 'permanent-delete' ? 'Delete Permanently' : 'Confirm'}
+                      confirmButtonColor={confirmModalDetails.type === 'permanent-delete' ? 'bg-red-500' : 'bg-yellow-500'}
+                  />
+              )}
             </div>
           );
         };
 
         // --- Components ---
 
-        const Header = ({ toggleSidebar, viewMode, setViewMode, sortOrder, setSortOrder }) => {
+        const Header = ({ toggleSidebar, viewMode, setViewMode, sortOrder, setSortOrder, showSidebar }) => {
           const [showSortMenu, setShowSortMenu] = useState(false);
 
           return (
             <div className="sticky top-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-b-xl flex justify-between items-center mx-4 mt-4 transition-all duration-300">
-              <button onClick={toggleSidebar} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
-                <i className="fas fa-bars fa-lg"></i>
+              <button onClick={toggleSidebar} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
+                <i className={`fa-lg ${showSidebar ? 'fas fa-times' : 'fas fa-bars'}`}></i>
               </button>
               <h1 className="text-2xl font-semibold text-gray-800">Notes</h1>
               <div className="flex space-x-2 relative">
                 {/* Sort Button */}
-                <button onClick={() => setShowSortMenu(!showSortMenu)} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                <button onClick={() => setShowSortMenu(!showSortMenu)} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
                   <i className="fas fa-sort fa-lg"></i>
                 </button>
                 {showSortMenu && (
@@ -368,7 +539,7 @@
                       <button
                         key={option}
                         onClick={() => { setSortOrder(option); setShowSortMenu(false); }}
-                        className={`block w-full text-left px-4 py-2 text-sm  'text-gray-700 hover:bg-gray-100'`}
+                        className={`block w-full text-left px-4 py-2 text-sm ${sortOrder === option ? 'bg-yellow-100 text-yellow-700 font-semibold' : 'text-gray-700 hover:bg-gray-100 transition-colors'}`}
                       >
                         {option}
                       </button>
@@ -376,7 +547,7 @@
                   </div>
                 )}
                 {/* View Toggle */}
-                <button onClick={() => setViewMode(viewMode === 'list' ? 'gallery' : 'list')} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                <button onClick={() => setViewMode(viewMode === 'list' ? 'gallery' : 'list')} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
                   <i className={viewMode === 'list' ? 'fas fa-th-large fa-lg' : 'fas fa-list fa-lg'}></i>
                 </button>
               </div>
@@ -384,13 +555,14 @@
           );
         };
 
-        const Sidebar = ({ folders, tags, activeFolder, setActiveFolder, showSidebar, onClose, setShowRecentlyDeleted, setFolders, setTags }) => {
+        const Sidebar = ({ folders, tags, activeFolder, setActiveFolder, showSidebar, onClose, setShowRecentlyDeleted, setFolders, setTags, handleAddFolder, handleDeleteFolder, handleAddTag, handleDeleteTag }) => {
           const sidebarRef = useRef(null);
 
-          // Close sidebar if clicked outside
+          // Close sidebar if clicked outside (only for mobile, desktop sidebar is fixed)
           useEffect(() => {
             const handleClickOutside = (event) => {
-              if (sidebarRef.current && !sidebarRef.current.contains(event.target) && showSidebar) {
+              // Only close sidebar on click outside if on mobile (screen width < 1024px)
+              if (window.innerWidth < 1024 && sidebarRef.current && !sidebarRef.current.contains(event.target) && showSidebar) {
                 onClose();
               }
             };
@@ -398,43 +570,12 @@
             return () => document.removeEventListener('mousedown', handleClickOutside);
           }, [showSidebar, onClose]);
 
-          const handleAddFolder = () => {
-            const newFolderName = prompt("Enter new folder name:");
-            if (newFolderName && !folders.includes(newFolderName)) {
-              setFolders([...folders, newFolderName]);
-            }
-          };
-
-          const handleDeleteFolder = (folderName) => {
-            if (folderName === 'All Notes' || !window.confirm(`Are you sure you want to delete folder ""?`)) {
-              return;
-            }
-            setFolders(folders.filter(f => f !== folderName));
-            if (activeFolder === folderName) {
-              setActiveFolder('All Notes');
-            }
-          };
-
-          const handleAddTag = () => {
-            const newTagName = prompt("Enter new tag name:");
-            if (newTagName && !tags.includes(newTagName)) {
-              setTags([...tags, newTagName]);
-            }
-          };
-
-          const handleDeleteTag = (tagName) => {
-            if (!window.confirm(`Are you sure you want to delete tag ""?`)) {
-              return;
-            }
-            setTags(tags.filter(t => t !== tagName));
-          };
-
 
           return (
             <div
               ref={sidebarRef}
               className={`fixed top-0 left-0 h-full w-64 bg-gray-50 shadow-xl z-40 transform transition-transform duration-300 ease-in-out
-                 '-translate-x-full'`}
+                ${showSidebar ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:desktop-sidebar-fixed`}
             >
               <div className="p-6 flex flex-col h-full">
                 <h2 className="text-3xl font-bold text-gray-800 mb-6">Notebook</h2>
@@ -443,7 +584,7 @@
                 <div className="mb-8">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-lg font-semibold text-gray-700">Folders</h3>
-                    <button onClick={handleAddFolder} className="p-1 rounded-full text-gray-600 hover:bg-gray-200 transition-colors">
+                    <button onClick={handleAddFolder} className="p-1 rounded-full text-gray-600 hover:bg-gray-200 transition-colors active:scale-95">
                       <i className="fas fa-plus fa-sm"></i>
                     </button>
                   </div>
@@ -452,13 +593,13 @@
                       <li key={folder} className="flex items-center justify-between group">
                         <button
                           onClick={() => setActiveFolder(folder)}
-                          className={`flex-1 text-left px-3 py-2 rounded-lg transition-colors duration-200
-                             'hover:bg-gray-100 text-gray-800'`}
+                          className={`flex-1 text-left px-3 py-2 rounded-lg transition-colors duration-200 active:scale-95
+                            ${activeFolder === folder ? 'bg-yellow-100 text-yellow-700 font-medium' : 'hover:bg-gray-100 text-gray-800'}`}
                         >
                           <i className="fas fa-folder mr-2"></i> {folder}
                         </button>
                         {folder !== 'All Notes' && (
-                          <button onClick={() => handleDeleteFolder(folder)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                          <button onClick={() => handleDeleteFolder(folder)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200 active:scale-95">
                             <i className="fas fa-trash fa-sm"></i>
                           </button>
                         )}
@@ -471,7 +612,7 @@
                 <div className="mb-8">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-lg font-semibold text-gray-700">Tags</h3>
-                    <button onClick={handleAddTag} className="p-1 rounded-full text-gray-600 hover:bg-gray-200 transition-colors">
+                    <button onClick={handleAddTag} className="p-1 rounded-full text-gray-600 hover:bg-gray-200 transition-colors active:scale-95">
                       <i className="fas fa-plus fa-sm"></i>
                     </button>
                   </div>
@@ -480,12 +621,12 @@
                       <li key={tag} className="flex items-center justify-between group">
                         <button
                           onClick={() => setActiveFolder(tag)} // Assuming clicking a tag filters by tag
-                          className={`flex-1 text-left px-3 py-2 rounded-lg transition-colors duration-200
-                             'hover:bg-gray-100 text-gray-800'`}
+                          className={`flex-1 text-left px-3 py-2 rounded-lg transition-colors duration-200 active:scale-95
+                            ${activeFolder === tag ? 'bg-yellow-100 text-yellow-700 font-medium' : 'hover:bg-gray-100 text-gray-800'}`}
                         >
                           <i className="fas fa-tag mr-2"></i> {tag}
                         </button>
-                        <button onClick={() => handleDeleteTag(tag)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <button onClick={() => handleDeleteTag(tag)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200 active:scale-95">
                           <i className="fas fa-trash fa-sm"></i>
                         </button>
                       </li>
@@ -500,7 +641,7 @@
                       setShowRecentlyDeleted(true);
                       onClose();
                     }}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-800 transition-colors duration-200"
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-800 transition-colors duration-200 active:scale-95"
                   >
                     <i className="fas fa-trash-alt mr-2"></i> Recently Deleted
                   </button>
@@ -528,7 +669,7 @@
           const previewContent = note.content.replace(/<[^>]*>/g, '').substring(0, 100) + (note.content.length > 100 ? '...' : '');
 
           return (
-            <div className="bg-white rounded-xl shadow-md p-4 flex flex-col space-y-2 transition-all duration-200 hover:shadow-lg relative">
+            <div className="bg-white rounded-xl shadow-md p-4 flex flex-col space-y-2 transition-all duration-200 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] relative">
               <div className="flex justify-between items-center mb-2" onClick={onEdit}>
                 <h3 className="text-lg font-semibold text-gray-800 truncate pr-10">{note.title}</h3>
                 <span className="text-sm text-gray-500">{new Date(note.updatedAt).toLocaleDateString()}</span>
@@ -542,34 +683,21 @@
               )}
 
               <div className="flex justify-end items-center space-x-2 mt-auto text-gray-500">
-                <button onClick={(e) => { e.stopPropagation(); onPin(note.id); }} className={`p-2 rounded-full hover:bg-gray-100  ''`} aria-label="Pin Note">
-                  <i className={`fas fa-thumbtack  'fa-regular'`}></i>
+                <button onClick={(e) => { e.stopPropagation(); onPin(note.id); }} className={`p-2 rounded-full hover:bg-gray-100 transition-all duration-200 active:scale-95 ${note.isPinned ? 'text-yellow-500' : ''}`} aria-label="Pin Note">
+                  <i className={`fas fa-thumbtack ${note.isPinned ? 'fa-solid' : 'fa-regular'}`}></i>
                 </button>
                 <div className="relative" ref={dropdownRef}>
-                  <button onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }} className="p-2 rounded-full hover:bg-gray-100" aria-label="More Actions">
+                  <button onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 active:scale-95" aria-label="More Actions">
                     <i className="fas fa-ellipsis-h"></i>
                   </button>
                   {showActions && (
                     <div className="absolute right-0 bottom-full mb-2 w-36 bg-white rounded-lg shadow-lg py-1 z-10">
-                      <button onClick={(e) => { e.stopPropagation(); onDelete(note.id); setShowActions(false); }} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                      <button onClick={(e) => { e.stopPropagation(); onDelete(note.id); setShowActions(false); }} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors">
                         <i className="fas fa-trash-alt mr-2"></i> Delete
                       </button>
-                      <div className="relative group">
-                        <button className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
-                          <i className="fas fa-folder-open mr-2"></i> Move to
-                        </button>
-                        <div className="absolute left-full top-0 ml-1 w-36 bg-white rounded-lg shadow-lg py-1 hidden group-hover:block z-20">
-                          {folders.map(folder => (
-                            <button
-                              key={folder}
-                              onClick={(e) => { e.stopPropagation(); onMove(note.id, folder); setShowActions(false); }}
-                              className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                            >
-                              {folder}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); onMove(note); setShowActions(false); }} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors">
+                        <i className="fas fa-folder-open mr-2"></i> Move to
+                      </button>
                     </div>
                   )}
                 </div>
@@ -595,11 +723,11 @@
           const previewContent = note.content.replace(/<[^>]*>/g, '').substring(0, 50) + (note.content.length > 50 ? '...' : '');
 
           return (
-            <div className="bg-white rounded-xl shadow-md p-4 flex flex-col transition-all duration-200 hover:shadow-lg cursor-pointer" onClick={onEdit}>
+            <div className="bg-white rounded-xl shadow-md p-4 flex flex-col transition-all duration-200 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] cursor-pointer" onClick={onEdit}>
               <div className="flex justify-between items-start mb-2">
                 <h3 className="text-base font-semibold text-gray-800 truncate pr-8">{note.title}</h3>
-                <button onClick={(e) => { e.stopPropagation(); onPin(note.id); }} className={`p-1 rounded-full hover:bg-gray-100  ''`} aria-label="Pin Note">
-                  <i className={`fas fa-thumbtack  'fa-regular'`}></i>
+                <button onClick={(e) => { e.stopPropagation(); onPin(note.id); }} className={`p-1 rounded-full hover:bg-gray-100 transition-all duration-200 active:scale-95 ${note.isPinned ? 'text-yellow-500' : ''}`} aria-label="Pin Note">
+                  <i className={`fas fa-thumbtack ${note.isPinned ? 'fa-solid' : 'fa-regular'}`}></i>
                 </button>
               </div>
               {note.drawing && (
@@ -611,30 +739,17 @@
               <div className="flex justify-between items-center text-gray-500 text-xs">
                 <span>{new Date(note.updatedAt).toLocaleDateString()}</span>
                 <div className="relative" ref={dropdownRef}>
-                  <button onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }} className="p-1 rounded-full hover:bg-gray-100" aria-label="More Actions">
+                  <button onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }} className="p-1 rounded-full hover:bg-gray-100 transition-all duration-200 active:scale-95" aria-label="More Actions">
                     <i className="fas fa-ellipsis-v"></i>
                   </button>
                   {showActions && (
                     <div className="absolute right-0 bottom-full mb-1 w-32 bg-white rounded-lg shadow-lg py-1 z-10">
-                      <button onClick={(e) => { e.stopPropagation(); onDelete(note.id); setShowActions(false); }} className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100">
+                      <button onClick={(e) => { e.stopPropagation(); onDelete(note.id); setShowActions(false); }} className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 transition-colors">
                         <i className="fas fa-trash-alt mr-2"></i> Delete
                       </button>
-                      <div className="relative group">
-                        <button className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100">
-                          <i className="fas fa-folder-open mr-2"></i> Move to
-                        </button>
-                        <div className="absolute left-full top-0 ml-1 w-32 bg-white rounded-lg shadow-lg py-1 hidden group-hover:block z-20">
-                          {folders.map(folder => (
-                            <button
-                              key={folder}
-                              onClick={(e) => { e.stopPropagation(); onMove(note.id, folder); setShowActions(false); }}
-                              className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100"
-                            >
-                              {folder}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); onMove(note); setShowActions(false); }} className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 transition-colors">
+                        <i className="fas fa-folder-open mr-2"></i> Move to
+                      </button>
                     </div>
                   )}
                 </div>
@@ -703,7 +818,7 @@
             <div className="min-h-screen bg-cream font-inter antialiased flex flex-col">
               {/* Top Bar */}
               <div className="sticky top-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-b-xl flex justify-between items-center mx-4 mt-4 transition-all duration-300">
-                <button onClick={() => { handleSave(); onBack(); }} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                <button onClick={() => { handleSave(); onBack(); }} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
                   <i className="fas fa-arrow-left fa-lg"></i>
                 </button>
                 <input
@@ -713,7 +828,7 @@
                   onBlur={handleSave}
                   className="flex-1 text-center text-xl font-semibold bg-transparent border-none focus:outline-none text-gray-800"
                 />
-                <button onClick={() => onDelete(currentNote.id)} className="p-2 rounded-full hover:bg-red-100 text-red-500 transition-all duration-200" aria-label="Delete Note">
+                <button onClick={() => onDelete(currentNote.id)} className="p-2 rounded-full hover:bg-red-100 text-red-500 transition-all duration-200 active:scale-95" aria-label="Delete Note">
                   <i className="fas fa-trash-alt fa-lg"></i>
                 </button>
               </div>
@@ -724,7 +839,7 @@
                   {noteTags.map(tag => (
                     <span key={tag} className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm flex items-center">
                       {tag}
-                      <button onClick={() => handleRemoveTagFromNote(tag)} className="ml-2 text-yellow-600 hover:text-yellow-900">
+                      <button onClick={() => handleRemoveTagFromNote(tag)} className="ml-2 text-yellow-600 hover:text-yellow-900 active:scale-95">
                         <i className="fas fa-times fa-xs"></i>
                       </button>
                     </span>
@@ -742,7 +857,7 @@
                   ) : (
                     <button
                       onClick={() => setShowTagInput(true)}
-                      className="text-gray-500 hover:text-gray-700 p-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+                      className="text-gray-500 hover:text-gray-700 p-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors active:scale-95"
                     >
                       <i className="fas fa-plus fa-sm mr-1"></i> Add Tag
                     </button>
@@ -766,7 +881,7 @@
                 {currentNote.drawing && (
                   <div className="my-4 p-2 border border-gray-300 rounded-lg bg-gray-50 flex flex-col items-center">
                     <img src={currentNote.drawing} alt="Note drawing" className="max-w-full h-auto object-contain rounded-md mb-2" />
-                    <button onClick={onDrawing} className="text-sm text-yellow-600 hover:underline">
+                    <button onClick={onDrawing} className="text-sm text-yellow-600 hover:underline active:scale-95">
                       <i className="fas fa-edit mr-1"></i> Edit Drawing
                     </button>
                   </div>
@@ -775,23 +890,23 @@
 
               {/* Bottom Toolbar */}
               <div className="sticky bottom-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-t-xl flex justify-around items-center mx-4 mb-4 transition-all duration-300">
-                <button onClick={() => handleEditorCommand('bold')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Bold">
+                <button onClick={() => handleEditorCommand('bold')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Bold">
                   <i className="fas fa-bold"></i>
                 </button>
-                <button onClick={() => handleEditorCommand('italic')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Italic">
+                <button onClick={() => handleEditorCommand('italic')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Italic">
                   <i className="fas fa-italic"></i>
                 </button>
-                <button onClick={() => handleEditorCommand('insertUnorderedList')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Unordered List">
+                <button onClick={() => handleEditorCommand('insertUnorderedList')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Unordered List">
                   <i className="fas fa-list-ul"></i>
                 </button>
-                <button onClick={handleToggleChecklist} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Checklist">
+                <button onClick={handleToggleChecklist} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Checklist">
                   <i className="fas fa-list-check"></i>
                 </button>
-                <button onClick={onDrawing} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Draw">
+                <button onClick={onDrawing} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Draw">
                   <i className="fas fa-paint-brush"></i>
                 </button>
-                <button onClick={handleInsertImage} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Insert Image">
-                  <i className="fas fa-paperclip"></i> {/* Changed to paperclip for attachments/images */}
+                <button onClick={handleInsertImage} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Insert Image">
+                  <i className="fas fa-paperclip"></i>
                 </button>
                 {/* Placeholder for Math Equation, Collapsible Section */}
                 <button className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 opacity-60 cursor-not-allowed" aria-label="Math Equation (Coming Soon)" title="Math Equation (Coming Soon)">
@@ -818,48 +933,53 @@
             const ctx = canvas.getContext('2d');
             setContext(ctx);
 
-            // Set canvas dimensions to fill screen
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight - 120; // Adjust for header/footer if any
-
-            if (initialDrawing) {
-              const img = new Image();
-              img.onload = () => {
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              };
-              img.src = initialDrawing;
-            }
-
-            const handleResize = () => {
-              canvas.width = window.innerWidth;
-              canvas.height = window.innerHeight - 120;
-              if (initialDrawing) { // Redraw initial content on resize
-                const img = new Image();
-                img.onload = () => {
-                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                };
-                img.src = initialDrawing;
-              }
+            // Set canvas dimensions to fill screen, accounting for header/footer
+            const setCanvasDimensions = () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight - 120; // Adjust for header/footer if any
+                if (initialDrawing) { // Redraw initial content on resize
+                    const img = new Image();
+                    img.onload = () => {
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    };
+                    img.src = initialDrawing;
+                }
             };
 
-            window.addEventListener('resize', handleResize);
-            return () => window.removeEventListener('resize', handleResize);
+            setCanvasDimensions(); // Set initial dimensions
+            window.addEventListener('resize', setCanvasDimensions);
+            return () => window.removeEventListener('resize', setCanvasDimensions);
           }, [initialDrawing]);
 
+          const getCoordinates = (e) => {
+            const rect = canvasRef.current.getBoundingClientRect();
+            if (e.touches && e.touches.length > 0) {
+              return {
+                x: e.touches[0].clientX - rect.left,
+                y: e.touches[0].clientY - rect.top,
+              };
+            } else {
+              return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+              };
+            }
+          };
+
           const startDrawing = (e) => {
+            e.preventDefault(); // Prevent scrolling on touch devices
             if (!context) return;
             setIsDrawing(true);
+            const { x, y } = getCoordinates(e);
             context.beginPath();
-            const { clientX, clientY } = e.touches ? e.touches[0] : e;
-            const { left, top } = canvasRef.current.getBoundingClientRect();
-            context.moveTo(clientX - left, clientY - top);
+            context.moveTo(x, y);
           };
 
           const draw = (e) => {
+            e.preventDefault(); // Prevent scrolling on touch devices
             if (!isDrawing || !context) return;
-            const { clientX, clientY } = e.touches ? e.touches[0] : e;
-            const { left, top } = canvasRef.current.getBoundingClientRect();
-            context.lineTo(clientX - left, clientY - top);
+            const { x, y } = getCoordinates(e);
+            context.lineTo(x, y);
             context.strokeStyle = drawingColor;
             context.lineWidth = brushSize;
             context.lineCap = 'round';
@@ -890,7 +1010,7 @@
             <div className="fixed inset-0 bg-cream z-50 flex flex-col">
               {/* Top Bar */}
               <div className="p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg flex justify-between items-center rounded-b-xl mx-4 mt-4">
-                <button onClick={onCancel} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Cancel">
+                <button onClick={onCancel} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Cancel">
                   <i className="fas fa-times fa-lg"></i>
                 </button>
                 <h2 className="text-xl font-semibold text-gray-800">Draw</h2>
@@ -917,7 +1037,7 @@
                   className="w-24 appearance-none h-2 bg-gray-200 rounded-lg outline-none cursor-pointer accent-yellow-400"
                   title="Brush Size"
                 />
-                <button onClick={handleClearCanvas} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Clear Canvas">
+                <button onClick={handleClearCanvas} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95" aria-label="Clear Canvas">
                   <i className="fas fa-eraser fa-lg"></i>
                 </button>
               </div>
@@ -945,7 +1065,7 @@
             <div className="min-h-screen bg-cream font-inter antialiased flex flex-col">
               {/* Top Bar */}
               <div className="sticky top-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-b-xl flex justify-between items-center mx-4 mt-4 transition-all duration-300">
-                <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 active:scale-95">
                   <i className="fas fa-arrow-left fa-lg"></i>
                 </button>
                 <h1 className="text-2xl font-semibold text-gray-800">Recently Deleted</h1>
@@ -958,7 +1078,7 @@
                   <p className="text-center text-gray-500 mt-10">No recently deleted notes.</p>
                 ) : (
                   notes.map(note => (
-                    <div key={note.id} className="bg-white rounded-xl shadow-md p-4 flex flex-col space-y-2 transition-all duration-200 hover:shadow-lg">
+                    <div key={note.id} className="bg-white rounded-xl shadow-md p-4 flex flex-col space-y-2 transition-all duration-200 hover:shadow-lg hover:scale-[1.01] active:scale-[0.99]">
                       <h3 className="text-lg font-semibold text-gray-800">{note.title}</h3>
                       <p className="text-gray-600 text-sm">{note.content.replace(/<[^>]*>/g, '').substring(0, 100) + (note.content.length > 100 ? '...' : '')}</p>
                       <div className="flex justify-end space-x-3 mt-2">
@@ -983,7 +1103,74 @@
           );
         };
 
+        const MoveNoteModal = ({ note, folders, onMove, onClose }) => {
+            const [selectedFolder, setSelectedFolder] = useState(note.folder);
+
+            return (
+                <div className="modal-overlay open">
+                    <div className="modal-content w-full max-w-sm">
+                        <h3 className="text-xl font-semibold mb-4 text-gray-800 text-center">Move "{note.title}"</h3>
+                        <div className="space-y-2 mb-6">
+                            {folders.map(folder => (
+                                <button
+                                    key={folder}
+                                    onClick={() => setSelectedFolder(folder)}
+                                    className={`w-full text-left px-4 py-3 rounded-lg flex justify-between items-center transition-colors duration-200
+                                        ${selectedFolder === folder ? 'bg-yellow-100 text-yellow-700 font-medium' : 'hover:bg-gray-100 text-gray-800'}`}
+                                >
+                                    <span><i className="fas fa-folder mr-3"></i> {folder}</span>
+                                    {selectedFolder === folder && <i className="fas fa-check text-yellow-500"></i>}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex justify-end space-x-3">
+                            <button
+                                onClick={onClose}
+                                className="px-5 py-2 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 transition-all duration-200 active:scale-95"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => onMove(note.id, selectedFolder)}
+                                disabled={selectedFolder === note.folder}
+                                className={`px-5 py-2 rounded-full text-white shadow-md transition-all duration-200 transform active:scale-95
+                                    ${selectedFolder === note.folder ? 'bg-gray-400 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-600'}`}
+                            >
+                                Move
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ConfirmModal = ({ message, onConfirm, onCancel, confirmButtonText = 'Confirm', confirmButtonColor = 'bg-yellow-500' }) => {
+            return (
+                <div className="modal-overlay open">
+                    <div className="modal-content w-full max-w-sm">
+                        <p className="text-lg text-gray-800 mb-6 text-center">{message}</p>
+                        <div className="flex justify-end space-x-3">
+                            <button
+                                onClick={onCancel}
+                                className="px-5 py-2 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 transition-all duration-200 active:scale-95"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={onConfirm}
+                                className={`px-5 py-2 rounded-full text-white shadow-md transition-all duration-200 transform active:scale-95 ${confirmButtonColor} hover:${confirmButtonColor.replace('bg-', 'bg-')}-600`}
+                            >
+                                {confirmButtonText}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+
         ReactDOM.render(<App />, document.getElementById('root'));
     </script>
 </body>
 </html>
+

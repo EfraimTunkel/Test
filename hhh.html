@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Notes App</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Kit (YOUR KIT) -->
+    <script src="https://kit.fontawesome.com/66e3b24af0.js" crossorigin="anonymous"></script>
+    <!-- Google Font: Inter (similar to San Francisco) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            margin: 0; /* Ensure no default body margin */
+            padding: 0; /* Ensure no default body padding */
+            overflow: hidden; /* Prevent body scroll, content will scroll */
+        }
+        #root {
+            min-height: 100vh; /* Ensure root fills viewport */
+            display: flex;
+            flex-direction: column;
+        }
+        .bg-cream {
+            background-color: #F8F7F2; /* Soft cream color */
+        }
+        .backdrop-blur-xl {
+            backdrop-filter: blur(20px);
+        }
+        .bg-opacity-40 {
+            background-color: rgba(255, 255, 255, 0.4);
+        }
+        .bg-opacity-30 {
+            background-color: rgba(255, 255, 255, 0.3);
+        }
+        [contenteditable]:empty:before {
+            content: attr(data-placeholder);
+            color: var(--placeholder-color);
+            pointer-events: none;
+        }
+        /* Hide HTML default input range thumb */
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background-color: #FACC15; /* yellow-400 */
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.3); /* subtle yellow shadow */
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background-color: #FACC15; /* yellow-400 */
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <!-- React CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+        const ReactDOM = window.ReactDOM;
+
+        // Utility function to generate a unique ID
+        const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
+
+        const App = () => {
+          const [notes, setNotes] = useState([]);
+          const [folders, setFolders] = useState(['All Notes', 'Work', 'Personal']);
+          const [tags, setTags] = useState(['Important', 'Idea', 'Urgent']);
+          const [activeFolder, setActiveFolder] = useState('All Notes');
+          const [searchTerm, setSearchTerm] = useState('');
+          const [sortOrder, setSortOrder] = useState('Newest'); // Newest, Oldest, A-Z, Z-A
+          const [viewMode, setViewMode] = useState('list'); // list or gallery
+          const [showSidebar, setShowSidebar] = useState(false);
+          const [editingNoteId, setEditingNoteId] = useState(null);
+          const [showRecentlyDeleted, setShowRecentlyDeleted] = useState(false);
+          const [recentlyDeletedNotes, setRecentlyDeletedNotes] = useState([]);
+          const [showDrawingModal, setShowDrawingModal] = useState(false);
+          const [drawingData, setDrawingData] = useState(null); // To store the drawing
+
+          const editorRef = useRef(null); // Ref for the contenteditable div
+          const bottomToolbarRef = useRef(null);
+          const [bottomToolbarHeight, setBottomToolbarHeight] = useState(0);
+
+          // Load notes and deleted notes from localStorage on initial render
+          useEffect(() => {
+            const storedNotes = JSON.parse(localStorage.getItem('notes')) || [];
+            setNotes(storedNotes);
+            const storedDeletedNotes = JSON.parse(localStorage.getItem('recentlyDeletedNotes')) || [];
+            setRecentlyDeletedNotes(storedDeletedNotes);
+            const storedFolders = JSON.parse(localStorage.getItem('folders')) || ['All Notes', 'Work', 'Personal'];
+            setFolders(storedFolders);
+            const storedTags = JSON.parse(localStorage.getItem('tags')) || ['Important', 'Idea', 'Urgent'];
+            setTags(storedTags);
+          }, []);
+
+          // Save notes and deleted notes to localStorage whenever they change
+          useEffect(() => {
+            localStorage.setItem('notes', JSON.stringify(notes));
+          }, [notes]);
+
+          useEffect(() => {
+            localStorage.setItem('recentlyDeletedNotes', JSON.stringify(recentlyDeletedNotes));
+          }, [recentlyDeletedNotes]);
+
+          useEffect(() => {
+            localStorage.setItem('folders', JSON.stringify(folders));
+          }, [folders]);
+
+          useEffect(() => {
+            localStorage.setItem('tags', JSON.stringify(tags));
+          }, [tags]);
+
+          // Calculate bottom toolbar height for padding adjustment
+          useEffect(() => {
+            if (bottomToolbarRef.current) {
+              setBottomToolbarHeight(bottomToolbarRef.current.offsetHeight);
+            }
+          }, [bottomToolbarRef.current]);
+
+
+          // Handle rich text commands
+          const handleEditorCommand = useCallback((command, value = null) => {
+            if (editorRef.current) {
+              document.execCommand(command, false, value);
+              editorRef.current.focus();
+              // Manually trigger input event to ensure state update if contenteditable doesn't fire it naturally
+              const event = new Event('input', { bubbles: true });
+              editorRef.current.dispatchEvent(event);
+            }
+          }, []);
+
+          const handleCreateNote = () => {
+            const newNote = {
+              id: generateId(),
+              title: 'New Note',
+              content: '',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              folder: activeFolder,
+              tags: [],
+              isPinned: false,
+              drawing: null, // New field for drawing
+            };
+            setNotes([newNote, ...notes]);
+          };
+
+          const handleUpdateNote = (updatedNote) => {
+            setNotes(notes.map(note => note.id === updatedNote.id ? { ...updatedNote, updatedAt: new Date().toISOString() } : note));
+          };
+
+          const handleDeleteNote = (id) => {
+            const noteToDelete = notes.find(note => note.id === id);
+            if (noteToDelete) {
+              setRecentlyDeletedNotes([noteToDelete, ...recentlyDeletedNotes]);
+              setNotes(notes.filter(note => note.id !== id));
+              if (editingNoteId === id) {
+                setEditingNoteId(null);
+              }
+            }
+          };
+
+          const handleRecoverNote = (id) => {
+            const noteToRecover = recentlyDeletedNotes.find(note => note.id === id);
+            if (noteToRecover) {
+              setNotes([noteToRecover, ...notes]);
+              setRecentlyDeletedNotes(recentlyDeletedNotes.filter(note => note.id !== id));
+            }
+          };
+
+          const handlePermanentDelete = (id) => {
+            setRecentlyDeletedNotes(recentlyDeletedNotes.filter(note => note.id !== id));
+          };
+
+          const handlePinNote = (id) => {
+            setNotes(notes.map(note => note.id === id ? { ...note, isPinned: !note.isPinned } : note));
+          };
+
+          const handleMoveNote = (id, newFolder) => {
+            setNotes(notes.map(note => note.id === id ? { ...note, folder: newFolder } : note));
+          };
+
+          const handleToggleChecklist = () => {
+            handleEditorCommand('insertUnorderedList');
+            // For a real checklist, you'd insert spans with checkbox-like functionality
+            // This is a simplified version just creating a bullet list
+          };
+
+          const handleInsertImage = () => {
+            const url = prompt("Enter image URL:");
+            if (url) {
+              handleEditorCommand('insertImage', url);
+            }
+          };
+
+          const handleSaveDrawing = (data) => {
+            setDrawingData(data); // Store the drawing data
+            if (editingNoteId) {
+              const currentNote = notes.find(note => note.id === editingNoteId);
+              if (currentNote) {
+                handleUpdateNote({ ...currentNote, drawing: data });
+              }
+            }
+            setShowDrawingModal(false);
+          };
+
+          const toggleSidebar = () => setShowSidebar(!showSidebar);
+          const closeSidebar = () => setShowSidebar(false);
+
+          // Filter and sort notes
+          const filteredAndSortedNotes = notes
+            .filter(note => activeFolder === 'All Notes' || note.folder === activeFolder)
+            .filter(note => note.title.toLowerCase().includes(searchTerm.toLowerCase()) || note.content.toLowerCase().includes(searchTerm.toLowerCase()))
+            .sort((a, b) => {
+              if (sortOrder === 'Newest') return new Date(b.createdAt) - new Date(a.createdAt);
+              if (sortOrder === 'Oldest') return new Date(a.createdAt) - new Date(b.createdAt);
+              if (sortOrder === 'A-Z') return a.title.localeCompare(b.title);
+              if (sortOrder === 'Z-A') return b.title.localeCompare(a.title);
+              return 0;
+            });
+
+          const activeNote = editingNoteId ? notes.find(note => note.id === editingNoteId) : null;
+
+          // Render different views based on state
+          if (showDrawingModal) {
+            return <DrawingCanvas onSave={handleSaveDrawing} onCancel={() => setShowDrawingModal(false)} initialDrawing={drawingData} />;
+          }
+
+          if (editingNoteId && activeNote) {
+            return (
+              <NoteEditor
+                note={activeNote}
+                onUpdate={handleUpdateNote}
+                onBack={() => setEditingNoteId(null)}
+                onDelete={handleDeleteNote}
+                editorRef={editorRef}
+                handleEditorCommand={handleEditorCommand}
+                handleToggleChecklist={handleToggleChecklist}
+                handleInsertImage={handleInsertImage}
+                onDrawing={() => setShowDrawingModal(true)}
+                currentDrawing={activeNote.drawing}
+                tags={tags}
+                setTags={setTags}
+              />
+            );
+          }
+
+          if (showRecentlyDeleted) {
+            return (
+              <RecentlyDeletedView
+                notes={recentlyDeletedNotes}
+                onRecover={handleRecoverNote}
+                onPermanentDelete={handlePermanentDelete}
+                onBack={() => setShowRecentlyDeleted(false)}
+              />
+            );
+          }
+
+          return (
+            <div className="min-h-screen bg-cream font-inter antialiased overflow-hidden flex flex-col">
+              {/* Sidebar */}
+              <Sidebar
+                folders={folders}
+                tags={tags}
+                activeFolder={activeFolder}
+                setActiveFolder={(folder) => {
+                  setActiveFolder(folder);
+                  closeSidebar();
+                }}
+                showSidebar={showSidebar}
+                onClose={closeSidebar}
+                setShowRecentlyDeleted={setShowRecentlyDeleted}
+                setFolders={setFolders}
+                setTags={setTags}
+              />
+
+              {/* Main Content */}
+              <div className={`flex-1 flex flex-col transition-transform duration-300  'translate-x-0'`}>
+                {/* Top Bar */}
+                <Header
+                  toggleSidebar={toggleSidebar}
+                  viewMode={viewMode}
+                  setViewMode={setViewMode}
+                  sortOrder={sortOrder}
+                  setSortOrder={setSortOrder}
+                />
+
+                {/* Notes List/Gallery */}
+                <div className="flex-1 overflow-y-auto px-4 pt-2" style={{ paddingBottom: `px` }}> {/* Add padding to account for bottom toolbar */}
+                  {filteredAndSortedNotes.length === 0 ? (
+                    <p className="text-center text-gray-500 mt-10">No notes found in this folder.</p>
+                  ) : viewMode === 'list' ? (
+                    <div className="space-y-3">
+                      {filteredAndSortedNotes.map(note => (
+                        <NoteCard key={note.id} note={note} onEdit={() => setEditingNoteId(note.id)} onDelete={handleDeleteNote} onPin={handlePinNote} onMove={handleMoveNote} folders={folders} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {filteredAndSortedNotes.map(note => (
+                        <NoteGalleryCard key={note.id} note={note} onEdit={() => setEditingNoteId(note.id)} onDelete={handleDeleteNote} onPin={handlePinNote} onMove={handleMoveNote} folders={folders} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Bottom Search Bar and New Note Button */}
+                <div ref={bottomToolbarRef} className="fixed bottom-0 left-0 right-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-t-lg flex items-center justify-between w-full transition-all duration-300">
+                  <div className="relative flex-1 mr-2">
+                    <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-500"></i>
+                    <input
+                      type="text"
+                      placeholder="Search"
+                      className="w-full pl-12 pr-4 py-2 rounded-full bg-gray-100 bg-opacity-50 border border-gray-200 focus:outline-none focus:ring-1 focus:ring-yellow-400 text-gray-800 placeholder-gray-500 transition-all duration-200"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <button
+                      className="bg-yellow-400 hover:bg-yellow-500 text-white rounded-lg p-3 shadow-lg transition-all duration-200 transform active:scale-95"
+                      onClick={handleCreateNote}
+                      aria-label="Create New Note"
+                  >
+                      <i className="fas fa-square-pen fa-lg"></i> {/* Changed to fas fa-square-pen for New Note */}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // --- Components ---
+
+        const Header = ({ toggleSidebar, viewMode, setViewMode, sortOrder, setSortOrder }) => {
+          const [showSortMenu, setShowSortMenu] = useState(false);
+
+          return (
+            <div className="sticky top-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-b-xl flex justify-between items-center mx-4 mt-4 transition-all duration-300">
+              <button onClick={toggleSidebar} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                <i className="fas fa-bars fa-lg"></i>
+              </button>
+              <h1 className="text-2xl font-semibold text-gray-800">Notes</h1>
+              <div className="flex space-x-2 relative">
+                {/* Sort Button */}
+                <button onClick={() => setShowSortMenu(!showSortMenu)} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                  <i className="fas fa-sort fa-lg"></i>
+                </button>
+                {showSortMenu && (
+                  <div className="absolute right-0 top-12 mt-2 w-48 bg-white rounded-lg shadow-xl py-1 z-40">
+                    {['Newest', 'Oldest', 'A-Z', 'Z-A'].map(option => (
+                      <button
+                        key={option}
+                        onClick={() => { setSortOrder(option); setShowSortMenu(false); }}
+                        className={`block w-full text-left px-4 py-2 text-sm  'text-gray-700 hover:bg-gray-100'`}
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* View Toggle */}
+                <button onClick={() => setViewMode(viewMode === 'list' ? 'gallery' : 'list')} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                  <i className={viewMode === 'list' ? 'fas fa-th-large fa-lg' : 'fas fa-list fa-lg'}></i>
+                </button>
+              </div>
+            </div>
+          );
+        };
+
+        const Sidebar = ({ folders, tags, activeFolder, setActiveFolder, showSidebar, onClose, setShowRecentlyDeleted, setFolders, setTags }) => {
+          const sidebarRef = useRef(null);
+
+          // Close sidebar if clicked outside
+          useEffect(() => {
+            const handleClickOutside = (event) => {
+              if (sidebarRef.current && !sidebarRef.current.contains(event.target) && showSidebar) {
+                onClose();
+              }
+            };
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+          }, [showSidebar, onClose]);
+
+          const handleAddFolder = () => {
+            const newFolderName = prompt("Enter new folder name:");
+            if (newFolderName && !folders.includes(newFolderName)) {
+              setFolders([...folders, newFolderName]);
+            }
+          };
+
+          const handleDeleteFolder = (folderName) => {
+            if (folderName === 'All Notes' || !window.confirm(`Are you sure you want to delete folder ""?`)) {
+              return;
+            }
+            setFolders(folders.filter(f => f !== folderName));
+            if (activeFolder === folderName) {
+              setActiveFolder('All Notes');
+            }
+          };
+
+          const handleAddTag = () => {
+            const newTagName = prompt("Enter new tag name:");
+            if (newTagName && !tags.includes(newTagName)) {
+              setTags([...tags, newTagName]);
+            }
+          };
+
+          const handleDeleteTag = (tagName) => {
+            if (!window.confirm(`Are you sure you want to delete tag ""?`)) {
+              return;
+            }
+            setTags(tags.filter(t => t !== tagName));
+          };
+
+
+          return (
+            <div
+              ref={sidebarRef}
+              className={`fixed top-0 left-0 h-full w-64 bg-gray-50 shadow-xl z-40 transform transition-transform duration-300 ease-in-out
+                 '-translate-x-full'`}
+            >
+              <div className="p-6 flex flex-col h-full">
+                <h2 className="text-3xl font-bold text-gray-800 mb-6">Notebook</h2>
+
+                {/* Folders Section */}
+                <div className="mb-8">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-lg font-semibold text-gray-700">Folders</h3>
+                    <button onClick={handleAddFolder} className="p-1 rounded-full text-gray-600 hover:bg-gray-200 transition-colors">
+                      <i className="fas fa-plus fa-sm"></i>
+                    </button>
+                  </div>
+                  <ul className="space-y-2">
+                    {folders.map(folder => (
+                      <li key={folder} className="flex items-center justify-between group">
+                        <button
+                          onClick={() => setActiveFolder(folder)}
+                          className={`flex-1 text-left px-3 py-2 rounded-lg transition-colors duration-200
+                             'hover:bg-gray-100 text-gray-800'`}
+                        >
+                          <i className="fas fa-folder mr-2"></i> {folder}
+                        </button>
+                        {folder !== 'All Notes' && (
+                          <button onClick={() => handleDeleteFolder(folder)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <i className="fas fa-trash fa-sm"></i>
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Tags Section */}
+                <div className="mb-8">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-lg font-semibold text-gray-700">Tags</h3>
+                    <button onClick={handleAddTag} className="p-1 rounded-full text-gray-600 hover:bg-gray-200 transition-colors">
+                      <i className="fas fa-plus fa-sm"></i>
+                    </button>
+                  </div>
+                  <ul className="space-y-2">
+                    {tags.map(tag => (
+                      <li key={tag} className="flex items-center justify-between group">
+                        <button
+                          onClick={() => setActiveFolder(tag)} // Assuming clicking a tag filters by tag
+                          className={`flex-1 text-left px-3 py-2 rounded-lg transition-colors duration-200
+                             'hover:bg-gray-100 text-gray-800'`}
+                        >
+                          <i className="fas fa-tag mr-2"></i> {tag}
+                        </button>
+                        <button onClick={() => handleDeleteTag(tag)} className="ml-2 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                          <i className="fas fa-trash fa-sm"></i>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Recently Deleted */}
+                <div className="mt-auto">
+                  <button
+                    onClick={() => {
+                      setShowRecentlyDeleted(true);
+                      onClose();
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-800 transition-colors duration-200"
+                  >
+                    <i className="fas fa-trash-alt mr-2"></i> Recently Deleted
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const NoteCard = ({ note, onEdit, onDelete, onPin, onMove, folders }) => {
+          const [showActions, setShowActions] = useState(false);
+          const dropdownRef = useRef(null);
+
+          // Close actions dropdown if clicked outside
+          useEffect(() => {
+            const handleClickOutside = (event) => {
+              if (dropdownRef.current && !dropdownRef.current.contains(event.target) && showActions) {
+                setShowActions(false);
+              }
+            };
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+          }, [showActions]);
+
+          const previewContent = note.content.replace(/<[^>]*>/g, '').substring(0, 100) + (note.content.length > 100 ? '...' : '');
+
+          return (
+            <div className="bg-white rounded-xl shadow-md p-4 flex flex-col space-y-2 transition-all duration-200 hover:shadow-lg relative">
+              <div className="flex justify-between items-center mb-2" onClick={onEdit}>
+                <h3 className="text-lg font-semibold text-gray-800 truncate pr-10">{note.title}</h3>
+                <span className="text-sm text-gray-500">{new Date(note.updatedAt).toLocaleDateString()}</span>
+              </div>
+              <p className="text-gray-600 text-sm flex-grow" onClick={onEdit}>{previewContent || 'No content'}</p>
+
+              {note.drawing && (
+                <div className="mt-2" onClick={onEdit}>
+                  <img src={note.drawing} alt="Note drawing preview" className="w-24 h-24 object-contain rounded-md border border-gray-200" />
+                </div>
+              )}
+
+              <div className="flex justify-end items-center space-x-2 mt-auto text-gray-500">
+                <button onClick={(e) => { e.stopPropagation(); onPin(note.id); }} className={`p-2 rounded-full hover:bg-gray-100  ''`} aria-label="Pin Note">
+                  <i className={`fas fa-thumbtack  'fa-regular'`}></i>
+                </button>
+                <div className="relative" ref={dropdownRef}>
+                  <button onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }} className="p-2 rounded-full hover:bg-gray-100" aria-label="More Actions">
+                    <i className="fas fa-ellipsis-h"></i>
+                  </button>
+                  {showActions && (
+                    <div className="absolute right-0 bottom-full mb-2 w-36 bg-white rounded-lg shadow-lg py-1 z-10">
+                      <button onClick={(e) => { e.stopPropagation(); onDelete(note.id); setShowActions(false); }} className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                        <i className="fas fa-trash-alt mr-2"></i> Delete
+                      </button>
+                      <div className="relative group">
+                        <button className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                          <i className="fas fa-folder-open mr-2"></i> Move to
+                        </button>
+                        <div className="absolute left-full top-0 ml-1 w-36 bg-white rounded-lg shadow-lg py-1 hidden group-hover:block z-20">
+                          {folders.map(folder => (
+                            <button
+                              key={folder}
+                              onClick={(e) => { e.stopPropagation(); onMove(note.id, folder); setShowActions(false); }}
+                              className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                            >
+                              {folder}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        const NoteGalleryCard = ({ note, onEdit, onDelete, onPin, onMove, folders }) => {
+          const [showActions, setShowActions] = useState(false);
+          const dropdownRef = useRef(null);
+
+          useEffect(() => {
+            const handleClickOutside = (event) => {
+              if (dropdownRef.current && !dropdownRef.current.contains(event.target) && showActions) {
+                setShowActions(false);
+              }
+            };
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+          }, [showActions]);
+
+          const previewContent = note.content.replace(/<[^>]*>/g, '').substring(0, 50) + (note.content.length > 50 ? '...' : '');
+
+          return (
+            <div className="bg-white rounded-xl shadow-md p-4 flex flex-col transition-all duration-200 hover:shadow-lg cursor-pointer" onClick={onEdit}>
+              <div className="flex justify-between items-start mb-2">
+                <h3 className="text-base font-semibold text-gray-800 truncate pr-8">{note.title}</h3>
+                <button onClick={(e) => { e.stopPropagation(); onPin(note.id); }} className={`p-1 rounded-full hover:bg-gray-100  ''`} aria-label="Pin Note">
+                  <i className={`fas fa-thumbtack  'fa-regular'`}></i>
+                </button>
+              </div>
+              {note.drawing && (
+                <div className="mt-2 flex justify-center items-center h-24 mb-2">
+                  <img src={note.drawing} alt="Note drawing preview" className="max-w-full max-h-full object-contain rounded-md border border-gray-200" />
+                </div>
+              )}
+              <p className="text-gray-600 text-sm flex-grow mb-2">{previewContent || 'No content'}</p>
+              <div className="flex justify-between items-center text-gray-500 text-xs">
+                <span>{new Date(note.updatedAt).toLocaleDateString()}</span>
+                <div className="relative" ref={dropdownRef}>
+                  <button onClick={(e) => { e.stopPropagation(); setShowActions(!showActions); }} className="p-1 rounded-full hover:bg-gray-100" aria-label="More Actions">
+                    <i className="fas fa-ellipsis-v"></i>
+                  </button>
+                  {showActions && (
+                    <div className="absolute right-0 bottom-full mb-1 w-32 bg-white rounded-lg shadow-lg py-1 z-10">
+                      <button onClick={(e) => { e.stopPropagation(); onDelete(note.id); setShowActions(false); }} className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100">
+                        <i className="fas fa-trash-alt mr-2"></i> Delete
+                      </button>
+                      <div className="relative group">
+                        <button className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100">
+                          <i className="fas fa-folder-open mr-2"></i> Move to
+                        </button>
+                        <div className="absolute left-full top-0 ml-1 w-32 bg-white rounded-lg shadow-lg py-1 hidden group-hover:block z-20">
+                          {folders.map(folder => (
+                            <button
+                              key={folder}
+                              onClick={(e) => { e.stopPropagation(); onMove(note.id, folder); setShowActions(false); }}
+                              className="block w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-gray-100"
+                            >
+                              {folder}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+
+        const NoteEditor = ({ note, onUpdate, onBack, onDelete, editorRef, handleEditorCommand, handleToggleChecklist, handleInsertImage, onDrawing, currentDrawing, tags, setTags }) => {
+          const [currentNote, setCurrentNote] = useState(note);
+          const [noteTags, setNoteTags] = useState(note.tags || []);
+          const [showTagInput, setShowTagInput] = useState(false);
+          const tagInputRef = useRef(null);
+
+          // Update currentNote when prop changes (e.g., if switching notes in future)
+          useEffect(() => {
+            setCurrentNote(note);
+            if (editorRef.current) {
+              editorRef.current.innerHTML = note.content;
+            }
+            setNoteTags(note.tags || []);
+          }, [note, editorRef]);
+
+          const handleTitleChange = (e) => {
+            setCurrentNote({ ...currentNote, title: e.target.value });
+          };
+
+          const handleContentChange = () => {
+            if (editorRef.current) {
+              setCurrentNote({ ...currentNote, content: editorRef.current.innerHTML });
+            }
+          };
+
+          const handleSave = () => {
+            onUpdate(currentNote);
+          };
+
+          const handleAddTagToNote = (tagName) => {
+            if (!noteTags.includes(tagName)) {
+              const updatedTags = [...noteTags, tagName];
+              setNoteTags(updatedTags);
+              setCurrentNote(prev => ({ ...prev, tags: updatedTags }));
+              setShowTagInput(false);
+            }
+          };
+
+          const handleRemoveTagFromNote = (tagName) => {
+            const updatedTags = noteTags.filter(tag => tag !== tagName);
+            setNoteTags(updatedTags);
+            setCurrentNote(prev => ({ ...prev, tags: updatedTags }));
+          };
+
+          const handleNewTagInput = (e) => {
+            if (e.key === 'Enter' && tagInputRef.current && tagInputRef.current.value.trim() !== '') {
+              const newTag = tagInputRef.current.value.trim();
+              if (!tags.includes(newTag)) { // Add to global tags if new
+                setTags(prevTags => [...prevTags, newTag]);
+              }
+              handleAddTagToNote(newTag);
+              tagInputRef.current.value = '';
+            }
+          };
+
+          return (
+            <div className="min-h-screen bg-cream font-inter antialiased flex flex-col">
+              {/* Top Bar */}
+              <div className="sticky top-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-b-xl flex justify-between items-center mx-4 mt-4 transition-all duration-300">
+                <button onClick={() => { handleSave(); onBack(); }} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                  <i className="fas fa-arrow-left fa-lg"></i>
+                </button>
+                <input
+                  type="text"
+                  value={currentNote.title}
+                  onChange={handleTitleChange}
+                  onBlur={handleSave}
+                  className="flex-1 text-center text-xl font-semibold bg-transparent border-none focus:outline-none text-gray-800"
+                />
+                <button onClick={() => onDelete(currentNote.id)} className="p-2 rounded-full hover:bg-red-100 text-red-500 transition-all duration-200" aria-label="Delete Note">
+                  <i className="fas fa-trash-alt fa-lg"></i>
+                </button>
+              </div>
+
+              {/* Tags Section */}
+              <div className="p-4 bg-white bg-opacity-30 backdrop-blur-sm shadow-sm mx-4 mt-2 rounded-lg">
+                <div className="flex flex-wrap items-center gap-2">
+                  {noteTags.map(tag => (
+                    <span key={tag} className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm flex items-center">
+                      {tag}
+                      <button onClick={() => handleRemoveTagFromNote(tag)} className="ml-2 text-yellow-600 hover:text-yellow-900">
+                        <i className="fas fa-times fa-xs"></i>
+                      </button>
+                    </span>
+                  ))}
+                  {showTagInput ? (
+                    <input
+                      ref={tagInputRef}
+                      type="text"
+                      placeholder="Add tag..."
+                      className="flex-grow p-1 rounded-md border border-gray-300 focus:outline-none focus:ring-1 focus:ring-yellow-400 text-sm"
+                      onBlur={() => setShowTagInput(false)}
+                      onKeyDown={handleNewTagInput}
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setShowTagInput(true)}
+                      className="text-gray-500 hover:text-gray-700 p-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+                    >
+                      <i className="fas fa-plus fa-sm mr-1"></i> Add Tag
+                    </button>
+                  )}
+                </div>
+              </div>
+
+
+              {/* Editor Area */}
+              <div className="flex-1 overflow-y-auto p-4 px-6 relative">
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  onInput={handleContentChange}
+                  onBlur={handleSave}
+                  className="min-h-full outline-none text-gray-800 text-base leading-relaxed p-2 -mx-2 focus:ring-0 focus:border-0"
+                  dangerouslySetInnerHTML={{ __html: currentNote.content }}
+                  data-placeholder="Start typing your note..."
+                  style={{ '--placeholder-color': 'rgba(107, 114, 128, 0.6)' }}
+                ></div>
+                {currentNote.drawing && (
+                  <div className="my-4 p-2 border border-gray-300 rounded-lg bg-gray-50 flex flex-col items-center">
+                    <img src={currentNote.drawing} alt="Note drawing" className="max-w-full h-auto object-contain rounded-md mb-2" />
+                    <button onClick={onDrawing} className="text-sm text-yellow-600 hover:underline">
+                      <i className="fas fa-edit mr-1"></i> Edit Drawing
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Toolbar */}
+              <div className="sticky bottom-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-t-xl flex justify-around items-center mx-4 mb-4 transition-all duration-300">
+                <button onClick={() => handleEditorCommand('bold')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Bold">
+                  <i className="fas fa-bold"></i>
+                </button>
+                <button onClick={() => handleEditorCommand('italic')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Italic">
+                  <i className="fas fa-italic"></i>
+                </button>
+                <button onClick={() => handleEditorCommand('insertUnorderedList')} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Unordered List">
+                  <i className="fas fa-list-ul"></i>
+                </button>
+                <button onClick={handleToggleChecklist} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Checklist">
+                  <i className="fas fa-list-check"></i>
+                </button>
+                <button onClick={onDrawing} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Draw">
+                  <i className="fas fa-paint-brush"></i>
+                </button>
+                <button onClick={handleInsertImage} className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Insert Image">
+                  <i className="fas fa-paperclip"></i> {/* Changed to paperclip for attachments/images */}
+                </button>
+                {/* Placeholder for Math Equation, Collapsible Section */}
+                <button className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 opacity-60 cursor-not-allowed" aria-label="Math Equation (Coming Soon)" title="Math Equation (Coming Soon)">
+                  <i className="fas fa-square-root-variable"></i>
+                </button>
+                <button className="p-3 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700 opacity-60 cursor-not-allowed" aria-label="Collapsible Section (Coming Soon)" title="Collapsible Section (Coming Soon)">
+                  <i className="fas fa-chevron-down"></i>
+                </button>
+              </div>
+            </div>
+          );
+        };
+
+
+        const DrawingCanvas = ({ onSave, onCancel, initialDrawing }) => {
+          const canvasRef = useRef(null);
+          const [drawingColor, setDrawingColor] = useState('#000000');
+          const [brushSize, setBrushSize] = useState(5);
+          const [isDrawing, setIsDrawing] = useState(false);
+          const [context, setContext] = useState(null);
+
+          useEffect(() => {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            setContext(ctx);
+
+            // Set canvas dimensions to fill screen
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight - 120; // Adjust for header/footer if any
+
+            if (initialDrawing) {
+              const img = new Image();
+              img.onload = () => {
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              };
+              img.src = initialDrawing;
+            }
+
+            const handleResize = () => {
+              canvas.width = window.innerWidth;
+              canvas.height = window.innerHeight - 120;
+              if (initialDrawing) { // Redraw initial content on resize
+                const img = new Image();
+                img.onload = () => {
+                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                };
+                img.src = initialDrawing;
+              }
+            };
+
+            window.addEventListener('resize', handleResize);
+            return () => window.removeEventListener('resize', handleResize);
+          }, [initialDrawing]);
+
+          const startDrawing = (e) => {
+            if (!context) return;
+            setIsDrawing(true);
+            context.beginPath();
+            const { clientX, clientY } = e.touches ? e.touches[0] : e;
+            const { left, top } = canvasRef.current.getBoundingClientRect();
+            context.moveTo(clientX - left, clientY - top);
+          };
+
+          const draw = (e) => {
+            if (!isDrawing || !context) return;
+            const { clientX, clientY } = e.touches ? e.touches[0] : e;
+            const { left, top } = canvasRef.current.getBoundingClientRect();
+            context.lineTo(clientX - left, clientY - top);
+            context.strokeStyle = drawingColor;
+            context.lineWidth = brushSize;
+            context.lineCap = 'round';
+            context.lineJoin = 'round';
+            context.stroke();
+          };
+
+          const endDrawing = () => {
+            setIsDrawing(false);
+            if (context) {
+              context.closePath();
+            }
+          };
+
+          const handleClearCanvas = () => {
+            if (context && canvasRef.current) {
+              context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            }
+          };
+
+          const handleSaveDrawing = () => {
+            if (canvasRef.current) {
+              onSave(canvasRef.current.toDataURL('image/png'));
+            }
+          };
+
+          return (
+            <div className="fixed inset-0 bg-cream z-50 flex flex-col">
+              {/* Top Bar */}
+              <div className="p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg flex justify-between items-center rounded-b-xl mx-4 mt-4">
+                <button onClick={onCancel} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Cancel">
+                  <i className="fas fa-times fa-lg"></i>
+                </button>
+                <h2 className="text-xl font-semibold text-gray-800">Draw</h2>
+                <button onClick={handleSaveDrawing} className="bg-yellow-400 hover:bg-yellow-500 text-white px-4 py-2 rounded-full shadow-md transition-all duration-200 transform active:scale-95" aria-label="Save Drawing">
+                  Save
+                </button>
+              </div>
+
+              {/* Drawing Controls */}
+              <div className="flex justify-center p-3 bg-white bg-opacity-30 backdrop-blur-sm shadow-sm rounded-lg mx-4 mt-2 space-x-3">
+                <input
+                  type="color"
+                  value={drawingColor}
+                  onChange={(e) => setDrawingColor(e.target.value)}
+                  className="w-10 h-10 rounded-full border-none cursor-pointer"
+                  title="Drawing Color"
+                />
+                <input
+                  type="range"
+                  min="1"
+                  max="20"
+                  value={brushSize}
+                  onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                  className="w-24 appearance-none h-2 bg-gray-200 rounded-lg outline-none cursor-pointer accent-yellow-400"
+                  title="Brush Size"
+                />
+                <button onClick={handleClearCanvas} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700" aria-label="Clear Canvas">
+                  <i className="fas fa-eraser fa-lg"></i>
+                </button>
+              </div>
+
+              {/* Canvas Area */}
+              <div className="flex-1 relative overflow-hidden flex justify-center items-center p-4">
+                <canvas
+                  ref={canvasRef}
+                  className="bg-white rounded-xl shadow-inner border border-gray-200 cursor-crosshair touch-none"
+                  onMouseDown={startDrawing}
+                  onMouseMove={draw}
+                  onMouseUp={endDrawing}
+                  onMouseLeave={endDrawing}
+                  onTouchStart={startDrawing}
+                  onTouchMove={draw}
+                  onTouchEnd={endDrawing}
+                ></canvas>
+              </div>
+            </div>
+          );
+        };
+
+        const RecentlyDeletedView = ({ notes, onRecover, onPermanentDelete, onBack }) => {
+          return (
+            <div className="min-h-screen bg-cream font-inter antialiased flex flex-col">
+              {/* Top Bar */}
+              <div className="sticky top-0 z-20 p-4 bg-white bg-opacity-40 backdrop-blur-xl shadow-lg rounded-b-xl flex justify-between items-center mx-4 mt-4 transition-all duration-300">
+                <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 transition-all duration-200 text-gray-700">
+                  <i className="fas fa-arrow-left fa-lg"></i>
+                </button>
+                <h1 className="text-2xl font-semibold text-gray-800">Recently Deleted</h1>
+                <div className="w-10"></div> {/* Placeholder for alignment */}
+              </div>
+
+              {/* Deleted Notes List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {notes.length === 0 ? (
+                  <p className="text-center text-gray-500 mt-10">No recently deleted notes.</p>
+                ) : (
+                  notes.map(note => (
+                    <div key={note.id} className="bg-white rounded-xl shadow-md p-4 flex flex-col space-y-2 transition-all duration-200 hover:shadow-lg">
+                      <h3 className="text-lg font-semibold text-gray-800">{note.title}</h3>
+                      <p className="text-gray-600 text-sm">{note.content.replace(/<[^>]*>/g, '').substring(0, 100) + (note.content.length > 100 ? '...' : '')}</p>
+                      <div className="flex justify-end space-x-3 mt-2">
+                        <button
+                          onClick={() => onRecover(note.id)}
+                          className="px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-white rounded-full text-sm shadow-md transition-all duration-200 transform active:scale-95"
+                        >
+                          <i className="fas fa-undo-alt mr-1"></i> Recover
+                        </button>
+                        <button
+                          onClick={() => onPermanentDelete(note.id)}
+                          className="px-4 py-2 bg-red-400 hover:bg-red-500 text-white rounded-full text-sm shadow-md transition-all duration-200 transform active:scale-95"
+                        >
+                          <i className="fas fa-times-circle mr-1"></i> Delete Permanently
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
